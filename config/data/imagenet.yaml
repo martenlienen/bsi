@@ -1,0 +1,13 @@
+_target_: bsi.data.imagenet.ImageNetDataModule
+
+name: imagenet${.n}
+
+root: data/imagenet${.n}
+batch_size: 128
+eval_batch_size: ~
+
+num_workers: 0
+in_memory: yes
+preload: yes
+
+n: ???

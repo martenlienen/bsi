@@ -1,0 +1,13 @@
+defaults:
+  - fourier_features: fourier
+
+_target_: bsi.models.dit.DenoisingDiT
+
+name: dit
+
+# DiT-L-2
+patch_size: 2
+dim: 1024
+depth: 24
+heads: 16
+dropout: ~

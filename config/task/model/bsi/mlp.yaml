@@ -1,0 +1,12 @@
+defaults:
+  - pos_emb: nyquist
+  - fourier_features: fourier
+
+_target_: bsi.models.mlp.DenoisingMLP
+
+name: mlp
+
+hidden_width: 256
+layers: 2
+actfn: silu
+zero_init: no

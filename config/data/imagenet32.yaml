@@ -1,0 +1,5 @@
+defaults:
+  - imagenet
+
+n: 32
+mem_gb: 48

@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+title: bsi
+type: software
+authors:
+  - given-names: Marten
+    family-names: Lienen
+    email: m.lienen@tum.de
+  - given-names: Marcel
+    family-names: Kollovieh
+    email: m.kollovieh@tum.de
+  - given-names: Stephan
+    family-names: Günnemann
+    email: s.guennemann@tum.de
+repository-code: "https://github.com/martenlienen/bsi"
+license: MIT
+preferred-citation:
+  type: conference-paper
+  title: "Generative Modeling with Bayesian Sample Inference"
+  authors:
+    - given-names: Marten
+      family-names: Lienen
+      email: m.lienen@tum.de
+    - given-names: Marcel
+      family-names: Kollovieh
+      email: m.kollovieh@tum.de
+    - given-names: Stephan
+      family-names: Günnemann
+      email: s.guennemann@tum.de
+  collection-title: "Preprint"
+  year: 2025
+  url: "https://arxiv.org/abs/2502.07580"

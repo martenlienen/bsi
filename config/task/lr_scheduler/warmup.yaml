@@ -1,0 +1,6 @@
+_target_: bsi.lr_scheduler.WarmUpScheduler
+
+name: warmup
+
+start_lr: 1e-8
+warmup_steps: 1000

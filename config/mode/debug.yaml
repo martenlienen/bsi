@@ -1,0 +1,8 @@
+# @package _global_
+
+debug: yes
+
+trainer:
+  check_val_every_n_epoch: 1
+  limit_train_batches: 1
+  limit_val_batches: 1

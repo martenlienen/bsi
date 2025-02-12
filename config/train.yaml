@@ -1,0 +1,52 @@
+defaults:
+  - data: cifar10
+  - hydra: default
+  # Allow the model to overwrite the settings below
+  - _self_
+  - mode: normal
+  - task: bsi
+  - experiment: ~
+
+gpus: 1
+# 2 days. This is not the maximum job length because of auto-requeuing. Control maximum
+# job length via max_steps.
+timeout_min: 2880
+seed: ~
+eval_testset: no
+
+name: ~
+title: exploring
+
+from_ckpt: ~
+
+logging:
+  wandb:
+    project: ${title}
+    group: ~
+    name: ${name}
+    entity: ~
+    id: ~
+    mode: online
+
+hydra:
+  job:
+    name: ${title}
+
+trainer:
+  accelerator: "auto"
+  devices: "auto"
+  precision: "32"
+
+  gradient_clip_val: 1.0
+
+  # Configure iteration-based training
+  max_steps: 50000
+  val_check_interval: 50000
+  check_val_every_n_epoch: ~
+
+  log_every_n_steps: 10
+  num_sanity_val_steps: 1
+  # We use our own distributed samplers
+  use_distributed_sampler: no
+
+matmul_precision: medium

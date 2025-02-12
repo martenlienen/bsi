@@ -1,0 +1,26 @@
+# Python artifacts
+__pycache__
+*.egg-info
+*.egg
+*.DS_Store
+
+# ML stuff
+/data
+/logs
+.hydra
+outputs
+multirun
+lightning_logs
+*.pickle
+.ipynb_checkpoints/
+/results
+
+# Logging
+/.brezn
+/wandb
+/checkpoints
+/runs
+
+# pixi environments
+.pixi
+*.egg-info

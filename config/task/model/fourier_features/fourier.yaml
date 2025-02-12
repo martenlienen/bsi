@@ -1,0 +1,6 @@
+_target_: bsi.nn.FourierFeatures
+
+name: fourier
+
+n_min: 6
+n_max: 8

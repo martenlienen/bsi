@@ -1,0 +1,11 @@
+name: ema
+
+beta: 0.9999
+power: 0.66666666666666666
+inv_gamma: 1.0
+
+update_after_step: 1000
+update_every: 1
+
+# Switch EMA
+update_model_with_ema_every: ~

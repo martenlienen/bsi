@@ -1,0 +1,16 @@
+defaults:
+  - pos_emb: nyquist
+  - fourier_features: fourier
+
+_target_: bsi.models.vdm_unet.DenoisingVDMUNet
+
+name: unet
+
+actfn: silu
+dim: 128
+levels: 32
+dropout: 0.1
+pos_emb_mult: 4
+downsampling_attention: no
+n_attention_heads: 1
+padding_mode: zeros

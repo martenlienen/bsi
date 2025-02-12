@@ -1,0 +1,6 @@
+_target_: bsi.models.pos_emb.NyquistPositionalEmbedding.from_config
+
+name: nyquist
+
+size: 32
+expected_rate: 100

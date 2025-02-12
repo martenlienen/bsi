@@ -1,0 +1,22 @@
+defaults:
+  - bsi: config
+  - model: bsi/unet
+
+  - ema: ema
+  - optimizer: adamw
+  - lr_scheduler: warmup
+
+_target_: bsi.tasks.bsi.BSITraining
+_recursive_: no
+
+name: bsi
+
+compile: yes
+compile_mode: ~
+n_elbo_recon_samples: 1
+n_elbo_measure_samples: 5
+
+optimizer:
+  lr: 3e-4
+  betas: [0.9, 0.99]
+  weight_decay: 1e-4

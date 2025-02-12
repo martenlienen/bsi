@@ -1,0 +1,45 @@
+# @package _global_
+
+# Same settings as in the VDM paper for comparability
+
+defaults:
+  - override /data: cifar10
+  - override /task/optimizer: adamw
+  - override /task: bsi
+  - override /task/model: bsi/unet
+
+hydra:
+  sweeper:
+    params:
+      seed: 1947925778702538666
+
+seed: ~
+eval_testset: yes
+
+name: ${task.name}
+title: bsi-${data.name}-vdm
+
+data:
+  batch_size: 128
+  eval_batch_size: 512
+
+task:
+  compile: yes
+  optimizer:
+    lr: 2e-4
+    betas: [0.9, 0.99]
+    weight_decay: 1e-2
+  model:
+    # Without augmentation
+    dim: 128
+    levels: 32
+    dropout: 0.1
+    pos_emb_mult: 4
+    downsampling_attention: no
+    n_attention_heads: 1
+
+trainer:
+  precision: "32"
+
+  max_steps: 10000000
+  val_check_interval: 100000

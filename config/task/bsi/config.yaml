@@ -1,0 +1,9 @@
+_target_: bsi.bsi.BSI
+
+lambda_0: 1e-2
+alpha_M: 1e6
+alpha_R: 2e6
+k: 50
+
+preconditioning: edm
+low_discrepancy_sampling: yes

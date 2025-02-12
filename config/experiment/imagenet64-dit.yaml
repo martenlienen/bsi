@@ -1,0 +1,43 @@
+# @package _global_
+
+defaults:
+  - override /data: imagenet64
+  - override /task/optimizer: adamw
+  - override /task: bsi
+  - override /task/model: bsi/dit
+
+hydra:
+  sweeper:
+    params:
+      seed: 17061203618076165322
+
+seed: ~
+eval_testset: yes
+
+name: ${task.name}-${task.model.name}
+title: bsi-${data.name}-vdm
+
+data:
+  batch_size: 512
+  eval_batch_size: 512
+
+task:
+  compile: yes
+  optimizer:
+    lr: 3e-4
+    betas: [0.9, 0.99]
+    weight_decay: 1e-2
+  model:
+    name: DiT-L-4
+    # Larger to keep memory usage under control at higher resolution
+    patch_size: 4
+    dim: 1024
+    depth: 24
+    heads: 16
+    dropout: 0.05
+
+trainer:
+  precision: "32"
+
+  max_steps: 10000000
+  val_check_interval: 100000
