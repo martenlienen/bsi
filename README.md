@@ -6,6 +6,8 @@ https://arxiv.org/abs/2502.07580
 
 <p align="center"><img src="figures/method.webp"></p>
 
+<p align="center"><img src="figures/animation.webp"></p>
+
 ## Getting Started
 
 Copy the self-contained [`bsi.py`](bsi/bsi.py) module into your project and you are good to go.
