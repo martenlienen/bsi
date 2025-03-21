@@ -73,7 +73,7 @@ class LogUniform:
         self.ln_high = math.log(self.high)
         self.diff_ln_high_ln_low = self.ln_high - self.ln_low
 
-    def reciprocal_prob(self, value: Float[Tensor, "..."]) -> Float[Tensor, "..."]:
+    def reciprocal_pdf(self, value: Float[Tensor, "..."]) -> Float[Tensor, "..."]:
         """Return the reciprocal probability density at `value`."""
         return value * self.diff_ln_high_ln_low
 
@@ -278,7 +278,7 @@ class BSI(nn.Module):
         x_hat = self._predict_x(mu_lambda.flatten(end_dim=1), t)
         x_hat = eo.rearrange(x_hat, "(n b) ... -> n b ...", n=n_samples)
         decoding_error = eo.reduce((x - x_hat).square(), "n b ... -> n b", "sum")
-        l_measure = 0.5 * self.p_lambda.reciprocal_prob(lambda_) * decoding_error
+        l_measure = 0.5 * self.p_lambda.reciprocal_pdf(lambda_) * decoding_error
         if return_samples:
             return l_measure
         else:
@@ -306,7 +306,7 @@ class BSI(nn.Module):
         mu = self._sample_q_mu_lambda(x, lambda_, generator)
         x_hat = self._predict_x(mu, self.p_lambda.cdf(lambda_))
         decoding_error = eo.reduce((x - x_hat).square(), "batch ... -> batch", "mean")
-        return decoding_error * self.p_lambda.reciprocal_prob(lambda_)
+        return decoding_error * self.p_lambda.reciprocal_pdf(lambda_)
 
     def sample(
         self,
@@ -349,14 +349,19 @@ class BSI(nn.Module):
         mu = torch.rsqrt(lambda_[0]) * torch.randn(
             (n_samples, *self.data_shape), **self.tensor_args, generator=generator
         )
+        mus = [mu]
+        ys = []
         for i in range(k):
             x_hats[i] = self._predict_x(mu, eo.repeat(t[i], "-> n", n=n_samples))
             y = x_hats[i] + torch.rsqrt(alpha[i]) * torch.randn(
                 (n_samples, *self.data_shape), **self.tensor_args, generator=generator
             )
             mu = (alpha[i] * y + lambda_[i] * mu) / lambda_[i + 1]
+
+            ys.append(y)
+            mus.append(mu)
         x_hats[-1] = self._predict_x(mu, mu.new_ones(n_samples))
-        return x_hats
+        return torch.stack(mus), x_hats, torch.stack(ys)
 
     def _predict_x(
         self, mu: Float[Tensor, "batch {self.data_shape}"], t: Float[Tensor, "batch"]

@@ -34,10 +34,10 @@ class Plots(pl.Callback):
         )
         plots["val/samples"] = wandb.Image(image.numpy(force=True))
 
-        histories = pl_module._sample_history(16, plot_generator)
-        assert torch.all(torch.isfinite(histories))
+        _, x_hats, _ = pl_module._sample_history(16, plot_generator)
+        assert torch.all(torch.isfinite(x_hats))
         histories_img = eo.rearrange(
-            discretization.to_8bit_image(histories),
+            discretization.to_8bit_image(x_hats),
             "hist batch c h w -> (batch h) (hist w) c",
         )
         plots["val/histories"] = wandb.Image(histories_img.numpy(force=True))
@@ -113,7 +113,7 @@ class BSITraining(pl.LightningModule):
             self.ema_model = create_ema(self.model, **ema)
             self.ema_bsi: BSI = instantiate(bsi, model=self.ema_model, **bsi_kwargs)
 
-        # Compile invididual bsi methods
+        # Compile individual BSI methods
         self._train_loss = self.bsi.train_loss
         if self.ema_bsi is None:
             self._elbo = self.bsi.elbo
@@ -198,7 +198,7 @@ class BSITraining(pl.LightningModule):
             stage = "train"
             metrics = self.train_sample_metrics
         else:
-            log.warning(f"Unknown dataloader index {dataloader_idx}")
+            log.warning(f"Unknown data loader index {dataloader_idx}")
             return
 
         return self.eval_step(stage, batch, batch_idx, metrics, self.val_generator)
@@ -265,7 +265,7 @@ class BSITraining(pl.LightningModule):
             stage = "train"
             metrics = self.train_sample_metrics
         else:
-            log.warning(f"Unknown dataloader index {dataloader_idx}")
+            log.warning(f"Unknown data loader index {dataloader_idx}")
             return
 
         return self.eval_step(stage, batch, batch_idx, metrics, self.test_generator)
