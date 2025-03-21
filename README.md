@@ -10,7 +10,9 @@ https://arxiv.org/abs/2502.07580
 
 ## Getting Started
 
-Copy the self-contained [`bsi.py`](bsi/bsi.py) module into your project and you are good to go.
+We provide an educational implementation for interactive exploration of the model in [`getting-started.ipynb`](./getting-started.ipynb). The notebook is self-contained, so you can download the file and directly run it on your own computer or [start it on Google Colab](https://colab.research.google.com/github/martenlienen/bsi/blob/main/getting-started.ipynb).
+
+To use BSI with your own model architecture, we recommend that you copy the self-contained [`bsi.py`](bsi/bsi.py) module into your project and you are good to go. The following code snippet shows you how to use the module with your own model and training code.
 ```python
 import torch
 from torch import nn
