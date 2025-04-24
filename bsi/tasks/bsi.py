@@ -104,14 +104,18 @@ class BSITraining(pl.LightningModule):
         self.discretization = Discretization.image_8bit()
         self.model = instantiate(model, data_shape=data_shape)
         bsi_kwargs = dict(data_shape=data_shape, discretization=self.discretization)
-        self.bsi: BSI = instantiate(bsi, model=self.model, **bsi_kwargs)
+        self.bsi: BSI = instantiate(
+            bsi, model=self.model, **bsi_kwargs, _convert_="object"
+        )
 
         if ema is None:
             self.ema_model = None
             self.ema_bsi = None
         else:
             self.ema_model = create_ema(self.model, **ema)
-            self.ema_bsi: BSI = instantiate(bsi, model=self.ema_model, **bsi_kwargs)
+            self.ema_bsi: BSI = instantiate(
+                bsi, model=self.ema_model, **bsi_kwargs, _convert_="object"
+            )
 
         # Compile individual BSI methods
         self._train_loss = self.bsi.train_loss
