@@ -1,15 +1,15 @@
 defaults:
-  - bsi: config
+  - bfn: config
   - model: bsi/unet
 
   - ema: ema
   - optimizer: adamw
   - lr_scheduler: warmup
 
-_target_: bsi.tasks.bsi.BSITraining
+_target_: bsi.tasks.bfn.BFNTraining
 _recursive_: no
 
-name: bsi
+name: bfn
 
 compile: yes
 compile_mode: ~

@@ -1,15 +1,15 @@
 defaults:
-  - bsi: config
+  - vdm: config
   - model: bsi/unet
 
   - ema: ema
   - optimizer: adamw
   - lr_scheduler: warmup
 
-_target_: bsi.tasks.bsi.BSITraining
+_target_: bsi.tasks.vdm.VDMTraining
 _recursive_: no
 
-name: bsi
+name: vdm
 
 compile: yes
 compile_mode: ~

@@ -15,6 +15,7 @@ from omegaconf import OmegaConf
 from torchmetrics.image.fid import FrechetInceptionDistance, _compute_fid
 from tqdm import tqdm
 
+from bsi.tasks.vdm import VDMTraining
 from bsi.utils import print_config, relative_to_project_root, set_seed
 
 warnings.filterwarnings(
@@ -62,8 +63,11 @@ def main():
     parser = argparse.ArgumentParser(description="Generate samples from a model")
     parser.add_argument("-c", "--checkpoint", help="Path to checkpoint", required=True)
     parser.add_argument("-o", "--out", help="Path to output folder", required=True)
-    parser.add_argument("-n", "--num_samples", type=int, help="Num samples for FID")
+    parser.add_argument("-n", "--num-samples", type=int, help="Num samples for FID")
     parser.add_argument("-s", "--schedule", default="linear", help="Schedule name")
+    parser.add_argument(
+        "-e", "--noema", action=argparse.BooleanOptionalAction, help="Disable EMA"
+    )
     parser.add_argument("-k", type=int, help="Number of sample steps", required=True)
     parser.add_argument("overrides", nargs="*")
 
@@ -73,20 +77,21 @@ def main():
     out_path = Path(args.out)
     num_samples = args.num_samples
     schedule_name = args.schedule
+    no_ema = args.noema
     k = args.k
     overrides = args.overrides
 
     if out_path.exists() and not out_path.is_dir():
         log.error(f"{out_path} exists and is not a directory")
-        sys.exit(1)
+        sys.exit()
 
-    ckpt = torch.load(ckpt_path)
+    ckpt = torch.load(ckpt_path, weights_only=False)
     if "config" in ckpt:
         log.info("Load config from checkpoint")
         run_config = OmegaConf.create(ckpt["config"])
     else:
         log.error("Checkpoint has no config")
-        sys.exit(1)
+        sys.exit()
     config = OmegaConf.merge(run_config, OmegaConf.from_cli(overrides))
     rng, seed_sequence = set_seed(config)
 
@@ -109,25 +114,31 @@ def main():
         num_samples = fid_stats(datamodule.short_name(), "test")["n"].item()
 
     generator = torch.Generator(device).manual_seed(16213294677523980332)
-    max_variance = 1 / task.bsi.lambda_0
-    min_variance = 1 / (task.bsi.lambda_0 + task.bsi.alpha_M)
+    if hasattr(task, "bsi"):
+        max_variance = 1 / task.bsi.lambda_0
+        min_variance = 1 / (task.bsi.lambda_0 + task.bsi.alpha_M)
     match schedule_name:
         case "linear":
-            t = torch.linspace(0, 1, k, device=device)
+            if isinstance(task, VDMTraining):
+                t = torch.linspace(1, 0, k + 1, device=device)
+            else:
+                t = torch.linspace(0, 1, k + 1, device=device)
         case "cosine":
             # Compute variances of cosine schedule here going from largest to smallest
             variance = (max_variance - min_variance) * torch.cos(
-                torch.linspace(0, 1, k, device=device) * torch.pi / 2
+                torch.linspace(0, 1, k + 1, device=device) * torch.pi / 2
             ) ** 2 + min_variance
             t = task.bsi.p_lambda.cdf(1 / variance)
         case "edm":
             variance = (
-                torch.linspace(max_variance.sqrt(), min_variance.sqrt(), k, device=device)
+                torch.linspace(
+                    max_variance.sqrt(), min_variance.sqrt(), k + 1, device=device
+                )
                 ** 2
             )
             t = task.bsi.p_lambda.cdf(1 / variance)
         case "edm7":
-            t = torch.linspace(0, 1, k, device=device)
+            t = torch.linspace(0, 1, k + 1, device=device)
             max_std = max_variance.sqrt()
             min_std = min_variance.sqrt()
             rho = 7
@@ -146,12 +157,14 @@ def main():
             batch_size=config.data.eval_batch_size,
         )
 
+        algorithm = task.algorithm if no_ema else task.ema_algorithm
+
         samples = []
         fid_embeddings = []
         with torch.inference_mode():
             bar = tqdm(desc="Samples", total=num_samples)
             for batch_size in batch_sizes:
-                batch = task.ema_bsi.sample(batch_size, generator=generator, t=t)
+                batch = algorithm.sample(batch_size, generator=generator, t=t)
                 batch = task.discretization.to_unit_interval(batch)
 
                 samples.append(batch.cpu())
@@ -166,7 +179,7 @@ def main():
         out_root = (
             out_path
             / datamodule.short_name()
-            / config.logging.wandb.id
+            / (config.logging.wandb.get("id") or "unknown")
             / f"{schedule_name}-{k}"
         )
         out_root.mkdir(parents=True, exist_ok=True)

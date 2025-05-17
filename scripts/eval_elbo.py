@@ -3,9 +3,9 @@
 import argparse
 import json
 import logging
-import math
 import sys
 import warnings
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +16,7 @@ from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from bsi.utils import print_config, set_seed
+from bsi.vdm import VDM
 
 warnings.filterwarnings(
     "ignore",
@@ -35,7 +36,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate the ELBO")
     parser.add_argument("-s", "--split", default="test", help="Data split to evaluate")
     parser.add_argument("-c", "--checkpoint", help="Path to checkpoint", required=True)
-    parser.add_argument("-o", "--out", help="Path to results pickle file", required=True)
+    parser.add_argument("-o", "--out", help="Path to results json file", required=True)
     parser.add_argument(
         "-r", "--r-samples", default=1, type=int, help="Number of reconstruction samples"
     )
@@ -43,7 +44,9 @@ def main():
         "-m", "--m-samples", default=1, type=int, help="Number of measurement samples"
     )
     parser.add_argument(
-        "-k", default=None, type=int, help="Number of steps for finite-step ELBO"
+        "-k",
+        nargs="+",
+        help="Number of steps for finite-step ELBO (int or 'inf')",
     )
     parser.add_argument("overrides", nargs="*")
 
@@ -51,19 +54,25 @@ def main():
 
     split = args.split
     ckpt_path = args.checkpoint
-    out_path = args.out
+    out_path = Path(args.out)
     r_samples = args.r_samples
     m_samples = args.m_samples
     k = args.k
     overrides = args.overrides
 
-    ckpt = torch.load(ckpt_path)
+    try:
+        k = ["inf" if s == "inf" else int(s) for s in k]
+    except TypeError:
+        log.error("-k takes integers or the string 'inf'")
+        sys.exit()
+
+    ckpt = torch.load(ckpt_path, weights_only=False)
     if "config" in ckpt:
         log.info("Load config from checkpoint")
         run_config = OmegaConf.create(ckpt["config"])
     else:
         log.error("Checkpoint has no config")
-        sys.exit(1)
+        sys.exit()
     config = OmegaConf.merge(run_config, OmegaConf.from_cli(overrides))
     rng, seed_sequence = set_seed(config)
 
@@ -84,7 +93,7 @@ def main():
         dataloader = datamodule.val_dataloader()
     elif split == "train":
         datamodule.setup("fit")
-        dataloader = datamodule.train_dataloader()
+        dataloader = datamodule.fid_train_dataloader()
     else:
         raise RuntimeError(f"Unknown split {split}")
     if isinstance(dataloader, list):
@@ -96,51 +105,58 @@ def main():
 
     generator = torch.Generator(device).manual_seed(5410195033249451849)
 
-    bpds = []
-    l_recons = []
-    l_measures = []
+    bpd_means = defaultdict(lambda: np.zeros((0,)))
+    bpd_mean_vars = defaultdict(lambda: np.zeros((0,)))
     try:
-        bsi = task.ema_bsi
+        model = task.ema_algorithm
         with torch.inference_mode():
-            bar = tqdm(dataloader)
-            for batch in bar:
-                batch = move_data_to_device(batch, device)
-                x, _ = batch
+            k_bar = tqdm(k)
+            for steps in k:
+                k_bar.set_description(f"k = {steps}")
+                batch_bar = tqdm(dataloader, desc="Batches", leave=True)
+                for batch in batch_bar:
+                    batch = move_data_to_device(batch, device)
+                    x, _ = batch
 
-                n_dim = math.prod(bsi.data_shape)
-                l_recon = bsi.reconstruction_loss(x, r_samples, generator)
-                if k is None:
-                    l_measure = bsi.inf_measurement_loss(
-                        x, m_samples, generator, return_samples=True
+                    if steps == "inf":
+                        elbo, bpd, extra = model.elbo(
+                            x, r_samples, m_samples, generator, estimate_var=True
+                        )
+                    else:
+                        if isinstance(model, VDM):
+                            t = torch.linspace(1.0, 0.0, steps + 1, device=device)
+                        else:
+                            t = torch.linspace(0.0, 1.0, steps + 1, device=device)
+
+                        elbo, bpd, extra = model.finite_elbo(
+                            x, r_samples, m_samples, generator, estimate_var=True, t=t
+                        )
+
+                    bpd_means[steps] = np.concat(
+                        (bpd_means[steps], bpd.numpy(force=True))
                     )
-                else:
-                    t = torch.linspace(0.0, 1.0, k, device=device)
-                    l_measure = bsi.finite_measurement_loss(
-                        x, m_samples, generator, t=t, return_samples=True
+                    bpd_mean_vars[steps] = np.concat(
+                        (bpd_mean_vars[steps], extra["bpd_var"].numpy(force=True))
                     )
 
-                # Bits per dimension
-                bpd = (l_recon + l_measure) / (math.log(2) * n_dim)
+                    mc_std = np.sqrt(
+                        (bpd_means[steps].var(ddof=1) + bpd_mean_vars[steps].mean())
+                        / len(bpd_means[steps])
+                    )
+                    batch_bar.set_postfix(
+                        {"bpd": f"{bpd_means[steps].mean().item():.4f} +- {mc_std:.4f}"}
+                    )
+                batch_bar.close()
 
-                bpds.append(bpd.cpu())
-                l_recons.append(l_recon.cpu())
-                l_measures.append(l_measure.cpu())
-
-                all_bpds = torch.cat(bpds)
-                bar.set_postfix(
-                    {
-                        "bpd": f"{all_bpds.mean().item():.4f}",
-                        "std": np.sqrt(all_bpds.var().item() / len(all_bpds)),
-                    }
-                )
+                n = len(bpd_means[steps])
+                steps_mean = bpd_means[steps].mean()
+                steps_mean_var = (
+                    bpd_means[steps].var(ddof=1) + bpd_mean_vars[steps].mean()
+                ) / n
+                bpd_means[steps] = steps_mean
+                bpd_mean_vars[steps] = steps_mean_var
     finally:
-        bpds = torch.cat(bpds).flatten().numpy()
-        l_recons = torch.cat(l_recons).flatten().numpy()
-        l_measures = torch.cat(l_measures).flatten().numpy()
-        print(
-            f"bpd: {bpds.mean()}, recon: {l_recons.mean()}, measure: {l_measures.mean()}"
-        )
-        meta = {
+        results = {
             "ckpt": str(ckpt_path),
             "config": {
                 "split": split,
@@ -149,29 +165,12 @@ def main():
                 "k": k,
                 "overrides": overrides,
             },
+            "bpd_means": {k: means.tolist() for k, means in bpd_means.items()},
+            "bpd_mean_vars": {k: vars.tolist() for k, vars in bpd_mean_vars.items()},
         }
-        full_results = {"bpd": bpds, "l_recon": l_recons, "l_measure": l_measures, **meta}
 
-        out_root = (
-            Path(out_path)
-            / datamodule.short_name()
-            / f"{split}"
-            / config.logging.wandb.id
-        )
-        out_root.mkdir(exist_ok=True, parents=True)
-        np.savez_compressed(
-            out_root / f"elbo-{k}-r{r_samples}-m{m_samples}.npz", **full_results
-        )
-
-        summarized_results = {
-            "bpd": float(bpds.mean()),
-            "l_recon": float(l_recons.mean()),
-            "l_measure": float(l_measures.mean()),
-            **meta,
-        }
-        (out_root / f"elbo-{k}-r{r_samples}-m{m_samples}.json").write_text(
-            json.dumps(summarized_results)
-        )
+        out_path.parent.mkdir(exist_ok=True, parents=True)
+        out_path.write_text(json.dumps(results))
 
 
 if __name__ == "__main__":

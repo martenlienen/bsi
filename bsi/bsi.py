@@ -155,22 +155,31 @@ class BSI(nn.Module):
         n_recon_samples: int,
         n_measure_samples: int,
         generator: torch.Generator | None = None,
+        *,
+        estimate_var: bool = False,
     ) -> tuple[
-        Float[Tensor, "batch"],
-        Float[Tensor, "batch"],
-        Float[Tensor, "batch"],
-        Float[Tensor, "batch"],
+        Float[Tensor, "batch"], Float[Tensor, "batch"], dict[str, Float[Tensor, "batch"]]
     ]:
         """Compute a Monte Carlo estimate of the infinite step ELBO."""
-        n_dim = math.prod(self.data_shape)
         l_recon = self.reconstruction_loss(x, n_recon_samples, generator)
         l_measure = self.inf_measurement_loss(x, n_measure_samples, generator)
-        elbo = -(l_recon + l_measure)
+        elbo = -(l_recon.mean(dim=0) + l_measure.mean(dim=0))
 
         # Bits per dimension
-        bpd = (-1 / (math.log(2) * n_dim)) * elbo
+        conversion_factor = -1 / (math.log(2) * math.prod(self.data_shape))
+        bpd = conversion_factor * elbo
 
-        return elbo, bpd, l_recon, l_measure
+        extra = {"l_recon": l_recon, "l_measure": l_measure}
+        if estimate_var:
+            # Estimate the variance of the Monte Carlo estimator
+            assert n_recon_samples > 1 and n_measure_samples > 1, (
+                "Need at least two samples of each to estimate variance"
+            )
+            l_recon_var = l_recon.var(dim=0, unbiased=True) / n_recon_samples
+            l_measure_var = l_measure.var(dim=0, unbiased=True) / n_measure_samples
+            extra["bpd_var"] = (conversion_factor**2) * (l_recon_var + l_measure_var)
+
+        return elbo, bpd, extra
 
     def finite_elbo(
         self,
@@ -180,30 +189,38 @@ class BSI(nn.Module):
         generator: torch.Generator | None = None,
         *,
         t: Float[Tensor, "{k + 1}"] | None = None,
+        estimate_var: bool = False,
     ) -> tuple[
-        Float[Tensor, "batch"],
-        Float[Tensor, "batch"],
-        Float[Tensor, "batch"],
-        Float[Tensor, "batch"],
+        Float[Tensor, "batch"], Float[Tensor, "batch"], dict[str, Float[Tensor, "batch"]]
     ]:
         """Compute a Monte Carlo estimate of the finite step ELBO."""
-        n_dim = math.prod(self.data_shape)
         l_recon = self.reconstruction_loss(x, n_recon_samples, generator)
         l_measure = self.finite_measurement_loss(x, n_measure_samples, generator, t=t)
-        elbo = -(l_recon + l_measure)
+        elbo = -(l_recon.mean(dim=0) + l_measure.mean(dim=0))
 
         # Bits per dimension
-        bpd = (-1 / (math.log(2) * n_dim)) * elbo
+        conversion_factor = -1 / (math.log(2) * math.prod(self.data_shape))
+        bpd = conversion_factor * elbo
 
-        return elbo, bpd, l_recon, l_measure
+        extra = {"l_recon": l_recon, "l_measure": l_measure}
+        if estimate_var:
+            # Estimate the variance of the Monte Carlo estimator
+            assert n_recon_samples > 1 and n_measure_samples > 1, (
+                "Need at least two samples of each to estimate variance"
+            )
+            l_recon_var = l_recon.var(dim=0, unbiased=True) / n_recon_samples
+            l_measure_var = l_measure.var(dim=0, unbiased=True) / n_measure_samples
+            extra["bpd_var"] = (conversion_factor**2) * (l_recon_var + l_measure_var)
+
+        return elbo, bpd, extra
 
     def reconstruction_loss(
         self,
         x: Float[Tensor, "batch {self.data_shape}"],
         n_samples: int,
         generator: torch.Generator | None = None,
-    ) -> Float[Tensor, "batch"]:
-        """Compute a Monte Carlo estimate of the reconstruction loss of x."""
+    ) -> Float[Tensor, "{n_samples} batch"]:
+        """Sample the reconstruction loss of x."""
         mu_lambda_M = self._sample_q_mu_lambda(
             x, x.new_full((n_samples, len(x)), self.lambda_0 + self.alpha_M), generator
         ).flatten(end_dim=1)
@@ -227,9 +244,7 @@ class BSI(nn.Module):
                 torch.clamp(cdf_right_clamped - cdf_left_clamped, min=1e-20)
             )
 
-        return eo.reduce(
-            -log_p_per_dim, "samples batch ... -> samples batch", "sum"
-        ).mean(dim=0)
+        return eo.reduce(-log_p_per_dim, "samples batch ... -> samples batch", "sum")
 
     def finite_measurement_loss(
         self,
@@ -238,9 +253,8 @@ class BSI(nn.Module):
         generator: torch.Generator | None = None,
         *,
         t: Float[Tensor, "{k + 1}"] | None = None,
-        return_samples: bool = False,
-    ) -> Float[Tensor, "batch"] | Float[Tensor, "{n_samples} batch"]:
-        """Compute a Monte Carlo estimate of the measurement loss in the finite step ELBO."""
+    ) -> Float[Tensor, "{n_samples} batch"]:
+        """Sample the measurement loss in the finite step ELBO."""
         if t is None:
             t = self.default_schedule
 
@@ -257,32 +271,22 @@ class BSI(nn.Module):
         x_hat = self._predict_x(mu_lambda.flatten(end_dim=1), t[i].flatten(end_dim=1))
         x_hat = eo.rearrange(x_hat, "(n b) ... -> n b ...", n=n_samples)
         decoding_error = eo.reduce((x - x_hat).square(), "n b ... -> n b", "sum")
-        l_measure = (0.5 * k) * alpha[i] * decoding_error
-        if return_samples:
-            return l_measure
-        else:
-            return torch.mean(l_measure, dim=0)
+        return (0.5 * k) * alpha[i] * decoding_error
 
     def inf_measurement_loss(
         self,
         x: Float[Tensor, "batch {self.data_shape}"],
         n_samples: int,
         generator: torch.Generator | None = None,
-        *,
-        return_samples: bool = False,
-    ) -> Float[Tensor, "batch"] | Float[Tensor, "{n_samples} batch"]:
-        """Compute a Monte Carlo estimate of the measurement loss in the infinite step ELBO."""
+    ) -> Float[Tensor, "batch"]:
+        """Sample the measurement loss in the infinite step ELBO."""
         lambda_ = self._sample_lambda(n_samples, len(x), generator)
         mu_lambda = self._sample_q_mu_lambda(x, lambda_, generator)
         t = self.p_lambda.cdf(lambda_).flatten(end_dim=1)
         x_hat = self._predict_x(mu_lambda.flatten(end_dim=1), t)
         x_hat = eo.rearrange(x_hat, "(n b) ... -> n b ...", n=n_samples)
         decoding_error = eo.reduce((x - x_hat).square(), "n b ... -> n b", "sum")
-        l_measure = 0.5 * self.p_lambda.reciprocal_pdf(lambda_) * decoding_error
-        if return_samples:
-            return l_measure
-        else:
-            return torch.mean(l_measure, dim=0)
+        return 0.5 * self.p_lambda.reciprocal_pdf(lambda_) * decoding_error
 
     def train_loss(
         self,
@@ -295,18 +299,15 @@ class BSI(nn.Module):
 
             - mean instead of sum over the dimensions to make the magnitude of the loss
               independent of the data shape
-
-            - no scaling factors (including constants like 1/2 but also p(alpha) from
-              importance sampling)
-
-            - with only a single Monte Carlo sample per data sample
+            - no constant scaling factors
+            - a single Monte Carlo sample per data sample
         """
 
         lambda_ = self._sample_lambda(1, len(x), generator)[0]
         mu = self._sample_q_mu_lambda(x, lambda_, generator)
         x_hat = self._predict_x(mu, self.p_lambda.cdf(lambda_))
         decoding_error = eo.reduce((x - x_hat).square(), "batch ... -> batch", "mean")
-        return decoding_error * self.p_lambda.reciprocal_pdf(lambda_)
+        return self.p_lambda.reciprocal_pdf(lambda_) * decoding_error
 
     def sample(
         self,
@@ -325,7 +326,9 @@ class BSI(nn.Module):
             (n_samples, *self.data_shape), **self.tensor_args, generator=generator
         )
         for i in range(k):
-            x_hat = self._predict_x(mu, eo.repeat(t[i], "-> n", n=n_samples))
+            # There is a compiler bug in pytorch 2.6 where t[i] takes on unexpected
+            # values if we don't clone it before repeating.
+            x_hat = self._predict_x(mu, eo.repeat(t[i].clone(), "-> n", n=n_samples))
             y = x_hat + torch.rsqrt(alpha[i]) * torch.randn(
                 (n_samples, *self.data_shape), **self.tensor_args, generator=generator
             )
@@ -338,7 +341,11 @@ class BSI(nn.Module):
         generator: torch.Generator | None = None,
         *,
         t: Float[Tensor, "{k + 1}"] | None = None,
-    ) -> Float[Tensor, "{k + 1} {n_samples} {self.data_shape}"]:
+    ) -> tuple[
+        Float[Tensor, "{k + 1} {n_samples} {self.data_shape}"],
+        Float[Tensor, "{k + 1} {n_samples} {self.data_shape}"],
+        Float[Tensor, "{k} {n_samples} {self.data_shape}"],
+    ]:
         """Draw `n_samples` samples and return all intermediate steps."""
         if t is None:
             t = self.default_schedule
@@ -352,7 +359,9 @@ class BSI(nn.Module):
         mus = [mu]
         ys = []
         for i in range(k):
-            x_hats[i] = self._predict_x(mu, eo.repeat(t[i], "-> n", n=n_samples))
+            # There is a compiler bug in pytorch 2.6 where t[i] takes on unexpected
+            # values if we don't clone it before repeating.
+            x_hats[i] = self._predict_x(mu, eo.repeat(t[i].clone(), "-> n", n=n_samples))
             y = x_hats[i] + torch.rsqrt(alpha[i]) * torch.randn(
                 (n_samples, *self.data_shape), **self.tensor_args, generator=generator
             )

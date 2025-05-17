@@ -48,13 +48,13 @@ def main():
     ckpt_path = args.checkpoint
     overrides = args.overrides
 
-    ckpt = torch.load(ckpt_path) if ckpt_path is not None else {}
+    ckpt = torch.load(ckpt_path, weights_only=False) if ckpt_path is not None else {}
     if "config" in ckpt:
         log.info("Load config from checkpoint")
         run_config = OmegaConf.create(ckpt["config"])
     else:
         log.error("Checkpoint has no config")
-        sys.exit(1)
+        sys.exit()
 
     config = OmegaConf.merge(run_config, OmegaConf.from_cli(overrides))
     rng, seed_sequence = set_seed(config)
@@ -77,7 +77,7 @@ def main():
         dataloaders = datamodule.val_dataloader()
     else:
         logger.error(f"Unknown data split {split}")
-        sys.exit(1)
+        sys.exit()
 
     metrics = trainer.test(model=task, ckpt_path=ckpt_path, dataloaders=dataloaders)
     if not isinstance(metrics, list):

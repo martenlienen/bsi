@@ -1,0 +1,9 @@
+_target_: bsi.vdm.VDM
+
+# Values used in the paper. However, the snr_min value retains 8% of the data at t = 1,
+# which seems to hinders learning significantly
+snr_min: 6.73794699909e-3
+snr_max: 597195.613793
+k: 50
+
+low_discrepancy_sampling: yes

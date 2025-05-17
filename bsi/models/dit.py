@@ -2,18 +2,18 @@
 Code adapted from the official implementation [1].
 
 Should almost be functionally the same, but has shape annotations, no unused code
-brances and does not rely on the timm library. In addition, we have added a linear layer
+branches and does not rely on the timm library. In addition, we have added a linear layer
 before the SiLU when computing the addLN modulation and dropout in the DiT block before
 the MLP to prevent overfitting on small datasets.
 
 [1] https://github.com/facebookresearch/DiT
 """
 
-import math
 from functools import partial
 
 import einops as eo
 import torch
+import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 from jaxtyping import Float
 from torch import Tensor, nn
@@ -21,28 +21,6 @@ from torch import Tensor, nn
 from bsi.nn import MLP, FourierFeatures
 
 from .pos_emb import NyquistPositionalEmbedding
-
-
-def scaled_dot_product_attention(
-    query: Float[Tensor, "batch heads patch channels"],
-    key: Float[Tensor, "batch heads patch channels"],
-    value: Float[Tensor, "batch heads patch channels"],
-    dropout_p: float = 0.0,
-) -> Tensor:
-    """Non-fused attention.
-
-    We have had problems with the fused attention kernels sometimes producing NaN
-    gradients even in non-degenerate conditions, so now we try this.
-
-    This is the pure-pytorch implementation equivalent to the efficient-attention fused
-    kernel according to the docstring of `F.scaled_dot_product_attention`.
-    """
-
-    scale_factor = 1 / math.sqrt(query.size(-1))
-    attn_weight = query @ key.transpose(-2, -1) * scale_factor
-    attn_weight = torch.softmax(attn_weight, dim=-1)
-    attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
-    return attn_weight @ value
 
 
 class Attention(nn.Module):
@@ -63,7 +41,7 @@ class Attention(nn.Module):
         ).contiguous()
 
         dropout_p = self.dropout if self.training else 0.0
-        out = scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
+        out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
 
         out = eo.rearrange(out, "b h p c -> b p (h c)")
         return self.to_out(out)

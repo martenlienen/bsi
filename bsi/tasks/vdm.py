@@ -11,9 +11,10 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.nn.parallel import DistributedDataParallel
 
-from ..bsi import BSI, Discretization
+from ..bsi import Discretization
 from ..utils import torch_generator_seed
 from ..utils.path import relative_to_project_root
+from ..vdm import VDM
 from .ema_pytorch import EMA
 from .metrics.fid import FIDScore
 
@@ -21,7 +22,7 @@ log = logging.getLogger(__name__)
 
 
 class Plots(pl.Callback):
-    def on_validation_epoch_end(self, trainer, pl_module: "BSITraining"):
+    def on_validation_epoch_end(self, trainer, pl_module: "VDMTraining"):
         plots = {}
 
         plot_generator = torch.Generator(pl_module.device).manual_seed(2831183658)
@@ -34,7 +35,7 @@ class Plots(pl.Callback):
         )
         plots["val/samples"] = wandb.Image(image.numpy(force=True))
 
-        _, x_hats, _ = pl_module._sample_history(16, plot_generator)
+        x_hats = pl_module._sample_history(16, plot_generator)
         assert torch.all(torch.isfinite(x_hats))
         histories_img = eo.rearrange(
             discretization.to_8bit_image(x_hats),
@@ -50,19 +51,13 @@ class Plots(pl.Callback):
             ).tolist()
         ]
         data = data.to(**tensor_args)
-        lambda_ = eo.repeat(
-            pl_module.bsi.p_lambda.icdf(quantiles), "i -> i b", b=len(data)
-        )
-        mu = pl_module.bsi._sample_q_mu_lambda(data, lambda_, plot_generator).flatten(
-            end_dim=1
-        )
-        x_hat = pl_module.bsi._predict_x(
-            mu, eo.repeat(quantiles, "i -> (i b)", b=len(data))
-        )
+        t = eo.repeat(quantiles, "i -> i b", b=len(data))
+        z_t = pl_module.vdm._sample_zt_given_x(data, t, plot_generator).flatten(end_dim=1)
+        x_hat = pl_module.vdm._predict_x(z_t, t.flatten())
         assert torch.all(torch.isfinite(x_hat))
         denoisings = eo.rearrange(
-            discretization.to_8bit_image(torch.stack((mu, x_hat))),
-            "stack (alphas batch) c h w -> (batch stack h) (alphas w) c",
+            discretization.to_8bit_image(torch.stack((z_t, x_hat))),
+            "stack (t batch) c h w -> (batch stack h) (t w) c",
             batch=len(data),
         )
         plots["val/denoisings"] = wandb.Image(denoisings.numpy(force=True))
@@ -81,11 +76,11 @@ def create_ema(model, beta=0.9999, update_after_step=100, update_every=10, **kwa
     )
 
 
-class BSITraining(pl.LightningModule):
+class VDMTraining(pl.LightningModule):
     def __init__(
         self,
         datamodule,
-        bsi: DictConfig,
+        vdm: DictConfig,
         model: DictConfig,
         ema: DictConfig | None,
         compile: bool,
@@ -103,30 +98,30 @@ class BSITraining(pl.LightningModule):
         data_shape = datamodule.data_shape()
         self.discretization = Discretization.image_8bit()
         self.model = instantiate(model, data_shape=data_shape)
-        bsi_kwargs = dict(data_shape=data_shape, discretization=self.discretization)
-        self.bsi: BSI = instantiate(
-            bsi, model=self.model, **bsi_kwargs, _convert_="object"
+        vdm_kwargs = dict(data_shape=data_shape, discretization=self.discretization)
+        self.vdm: VDM = instantiate(
+            vdm, model=self.model, **vdm_kwargs, _convert_="object"
         )
 
         if ema is None:
             self.ema_model = None
-            self.ema_bsi = None
+            self.ema_vdm = None
         else:
             self.ema_model = create_ema(self.model, **ema)
-            self.ema_bsi: BSI = instantiate(
-                bsi, model=self.ema_model, **bsi_kwargs, _convert_="object"
+            self.ema_vdm: VDM = instantiate(
+                vdm, model=self.ema_model, **vdm_kwargs, _convert_="object"
             )
 
-        # Compile individual BSI methods
-        self._train_loss = self.bsi.train_loss
-        if self.ema_bsi is None:
-            self._elbo = self.bsi.elbo
-            self._sample = self.bsi.sample
-            self._sample_history = self.bsi.sample_history
+        # Compile individual VDM methods
+        self._train_loss = self.vdm.train_loss
+        if self.ema_vdm is None:
+            self._elbo = self.vdm.elbo
+            self._sample = self.vdm.sample
+            self._sample_history = self.vdm.sample_history
         else:
-            self._elbo = self.ema_bsi.elbo
-            self._sample = self.ema_bsi.sample
-            self._sample_history = self.ema_bsi.sample_history
+            self._elbo = self.ema_vdm.elbo
+            self._sample = self.ema_vdm.sample
+            self._sample_history = self.ema_vdm.sample_history
         if compile:
             self._train_loss = torch.compile(self._train_loss, mode=compile_mode)
             self._elbo = torch.compile(self._elbo, mode=compile_mode)
@@ -154,16 +149,16 @@ class BSITraining(pl.LightningModule):
 
     @property
     def algorithm(self):
-        return self.bsi
+        return self.vdm
 
     @property
     def ema_algorithm(self):
-        return self.ema_bsi
+        return self.ema_vdm
 
     def configure_ddp(self):
         # Compilation applies lazily, so we can just update it with the wrapped model
-        self.bsi.set_model(DistributedDataParallel(self.model, static_graph=True))
-        assert isinstance(self.bsi.model, DistributedDataParallel)
+        self.vdm.set_model(DistributedDataParallel(self.model, static_graph=True))
+        assert isinstance(self.vdm.model, DistributedDataParallel)
 
     def _metrics(self, stage: str, datamodule):
         sample_metrics = {}

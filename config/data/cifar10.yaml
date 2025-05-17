@@ -8,7 +8,7 @@ eval_batch_size: ~
 augment:
   flip: no
 
-mem_gb: 8
+mem_gb: 16
 
 num_workers: 0
 in_memory: yes

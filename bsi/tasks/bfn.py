@@ -11,7 +11,8 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.nn.parallel import DistributedDataParallel
 
-from ..bsi import BSI, Discretization
+from ..bfn import BFN
+from ..bsi import Discretization
 from ..utils import torch_generator_seed
 from ..utils.path import relative_to_project_root
 from .ema_pytorch import EMA
@@ -21,7 +22,7 @@ log = logging.getLogger(__name__)
 
 
 class Plots(pl.Callback):
-    def on_validation_epoch_end(self, trainer, pl_module: "BSITraining"):
+    def on_validation_epoch_end(self, trainer, pl_module: "BFNTraining"):
         plots = {}
 
         plot_generator = torch.Generator(pl_module.device).manual_seed(2831183658)
@@ -50,15 +51,11 @@ class Plots(pl.Callback):
             ).tolist()
         ]
         data = data.to(**tensor_args)
-        lambda_ = eo.repeat(
-            pl_module.bsi.p_lambda.icdf(quantiles), "i -> i b", b=len(data)
-        )
-        mu = pl_module.bsi._sample_q_mu_lambda(data, lambda_, plot_generator).flatten(
+        t = eo.repeat(quantiles, "i -> i b", b=len(data))
+        mu = pl_module.bfn._sample_flow_distribution(data, t, plot_generator).flatten(
             end_dim=1
         )
-        x_hat = pl_module.bsi._predict_x(
-            mu, eo.repeat(quantiles, "i -> (i b)", b=len(data))
-        )
+        x_hat = pl_module.bfn._predict_x(mu, t.flatten())
         assert torch.all(torch.isfinite(x_hat))
         denoisings = eo.rearrange(
             discretization.to_8bit_image(torch.stack((mu, x_hat))),
@@ -81,11 +78,11 @@ def create_ema(model, beta=0.9999, update_after_step=100, update_every=10, **kwa
     )
 
 
-class BSITraining(pl.LightningModule):
+class BFNTraining(pl.LightningModule):
     def __init__(
         self,
         datamodule,
-        bsi: DictConfig,
+        bfn: DictConfig,
         model: DictConfig,
         ema: DictConfig | None,
         compile: bool,
@@ -103,30 +100,30 @@ class BSITraining(pl.LightningModule):
         data_shape = datamodule.data_shape()
         self.discretization = Discretization.image_8bit()
         self.model = instantiate(model, data_shape=data_shape)
-        bsi_kwargs = dict(data_shape=data_shape, discretization=self.discretization)
-        self.bsi: BSI = instantiate(
-            bsi, model=self.model, **bsi_kwargs, _convert_="object"
+        bfn_kwargs = dict(data_shape=data_shape, discretization=self.discretization)
+        self.bfn: BFN = instantiate(
+            bfn, model=self.model, **bfn_kwargs, _convert_="object"
         )
 
         if ema is None:
             self.ema_model = None
-            self.ema_bsi = None
+            self.ema_bfn = None
         else:
             self.ema_model = create_ema(self.model, **ema)
-            self.ema_bsi: BSI = instantiate(
-                bsi, model=self.ema_model, **bsi_kwargs, _convert_="object"
+            self.ema_bfn: BFN = instantiate(
+                bfn, model=self.ema_model, **bfn_kwargs, _convert_="object"
             )
 
-        # Compile individual BSI methods
-        self._train_loss = self.bsi.train_loss
-        if self.ema_bsi is None:
-            self._elbo = self.bsi.elbo
-            self._sample = self.bsi.sample
-            self._sample_history = self.bsi.sample_history
+        # Compile individual BFN methods
+        self._train_loss = self.bfn.train_loss
+        if self.ema_bfn is None:
+            self._elbo = self.bfn.elbo
+            self._sample = self.bfn.sample
+            self._sample_history = self.bfn.sample_history
         else:
-            self._elbo = self.ema_bsi.elbo
-            self._sample = self.ema_bsi.sample
-            self._sample_history = self.ema_bsi.sample_history
+            self._elbo = self.ema_bfn.elbo
+            self._sample = self.ema_bfn.sample
+            self._sample_history = self.ema_bfn.sample_history
         if compile:
             self._train_loss = torch.compile(self._train_loss, mode=compile_mode)
             self._elbo = torch.compile(self._elbo, mode=compile_mode)
@@ -154,16 +151,16 @@ class BSITraining(pl.LightningModule):
 
     @property
     def algorithm(self):
-        return self.bsi
+        return self.bfn
 
     @property
     def ema_algorithm(self):
-        return self.ema_bsi
+        return self.ema_bfn
 
     def configure_ddp(self):
         # Compilation applies lazily, so we can just update it with the wrapped model
-        self.bsi.set_model(DistributedDataParallel(self.model, static_graph=True))
-        assert isinstance(self.bsi.model, DistributedDataParallel)
+        self.bfn.set_model(DistributedDataParallel(self.model, static_graph=True))
+        assert isinstance(self.bfn.model, DistributedDataParallel)
 
     def _metrics(self, stage: str, datamodule):
         sample_metrics = {}

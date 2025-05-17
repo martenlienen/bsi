@@ -46,7 +46,7 @@ def global_setup():
     tmpdir.mkdir(parents=True, exist_ok=True)
     os.environ["TMPDIR"] = str(tmpdir)
 
-    # Log to traceback to stderr on segfault
+    # Log traceback to stderr on segfault
     faulthandler.enable(all_threads=False)
 
     # If data loading is really not a bottleneck for you, uncomment this to silence the
@@ -111,7 +111,8 @@ def get_callbacks(config, logger):
     callbacks = [
         ModelCheckpoint(
             dirpath=f"runs/{logger.name}/{logger.version}",
-            save_top_k=-1,
+            save_top_k=1,
+            save_last=True,
             # This ensures that a checkpoint is saved after every validation
             every_n_epochs=1,
         ),

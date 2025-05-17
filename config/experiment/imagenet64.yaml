@@ -1,21 +1,22 @@
 # @package _global_
 
 defaults:
-  - override /data: imagenet32
+  - override /data: imagenet64
   - override /task/optimizer: adamw
-  - override /task: bsi
+  - override /task/lr_scheduler: cosine
   - override /task/model: bsi/dit
 
 hydra:
   sweeper:
     params:
-      seed: 17547413574248915963
+      seed: 16075619163396078907,12922452962863710090,18370715745675157428
+      task: vdm,bfn,bsi
 
 seed: ~
 eval_testset: yes
 
 name: ${task.name}-${task.model.name}
-title: bsi-${data.name}-vdm
+title: bsi-${data.name}
 
 data:
   batch_size: 512
@@ -24,12 +25,14 @@ data:
 task:
   compile: yes
   optimizer:
-    lr: 2e-4
+    lr: 5e-4
     betas: [0.9, 0.99]
     weight_decay: 1e-2
+  lr_scheduler:
+    end_lr: 5e-5
   model:
-    name: DiT-L-2
-    patch_size: 2
+    name: DiT-L-4
+    patch_size: 4
     dim: 1024
     depth: 24
     heads: 16
@@ -38,5 +41,5 @@ task:
 trainer:
   precision: "32"
 
-  max_steps: 10000000
+  max_steps: 1000000
   val_check_interval: 100000

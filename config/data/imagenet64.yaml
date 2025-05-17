@@ -5,4 +5,4 @@ n: 64
 
 num_workers: 0
 in_memory: no
-mem_gb: 16
+mem_gb: 48

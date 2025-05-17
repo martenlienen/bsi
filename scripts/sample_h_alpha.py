@@ -43,13 +43,13 @@ def main():
     out_path = args.out
     overrides = args.overrides
 
-    ckpt = torch.load(ckpt_path)
+    ckpt = torch.load(ckpt_path, weights_only=False)
     if "config" in ckpt:
         log.info("Load config from checkpoint")
         run_config = OmegaConf.create(ckpt["config"])
     else:
         log.error("Checkpoint has no config")
-        sys.exit(1)
+        sys.exit()
 
     config = OmegaConf.merge(run_config, OmegaConf.from_cli(overrides))
     rng, seed_sequence = set_seed(config)

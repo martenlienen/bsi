@@ -1,0 +1,8 @@
+_target_: bsi.bfn.BFN
+
+sigma_1: 1e-3
+k: 50
+x_min: -1.0
+x_max: 1.0
+t_min: 1e-6
+low_discrepancy_sampling: yes
