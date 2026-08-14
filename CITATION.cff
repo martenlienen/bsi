@@ -14,7 +14,7 @@ authors:
 repository-code: "https://github.com/martenlienen/bsi"
 license: MIT
 preferred-citation:
-  type: conference-paper
+  type: article
   title: "Generative Modeling with Bayesian Sample Inference"
   authors:
     - given-names: Marten
@@ -26,6 +26,7 @@ preferred-citation:
     - given-names: Stephan
       family-names: Günnemann
       email: s.guennemann@tum.de
-  collection-title: "Preprint"
-  year: 2025
-  url: "https://arxiv.org/abs/2502.07580"
+  journal: "Transactions on Machine Learning Research"
+  issn: "2835-8856"
+  year: 2026
+  url: "https://openreview.net/forum?id=n8qQPnalVW"

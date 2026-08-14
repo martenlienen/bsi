@@ -110,13 +110,13 @@ To resume training from a checkpoint, pass a `.ckpt` file:
 If you build upon this work, please cite our paper as follows.
 
 ```bibtex
-@article{lienen2024bsi,
+@article{
+  lienen2026generative,
   title={Generative Modeling with Bayesian Sample Inference},
-  author={Lienen, Marten and Kollovieh, Marcel and G{\"u}nnemann, Stephan},
-  year={2025},
-  eprint={2502.07580},
-  archivePrefix={arXiv},
-  primaryClass={cs.LG},
-  url={https://arxiv.org/abs/2502.07580},
+  author={Marten Lienen and Marcel Kollovieh and Stephan G{\"u}nnemann},
+  journal={Transactions on Machine Learning Research},
+  issn={2835-8856},
+  year={2026},
+  url={https://openreview.net/forum?id=n8qQPnalVW}
 }
 ```
